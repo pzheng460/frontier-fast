@@ -1,0 +1,72 @@
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index 60fe130..8c0ed2d 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -20,6 +20,7 @@
+ #include <algorithm>
+ #include <cstddef>
+ #include <cinttypes>
++#include <cstdlib>
+ #include <exception>
+ #include <memory>
+ #include <filesystem>
+@@ -2778,6 +2779,11 @@ private:
+     };
+ #endif
+ 
++    bool target_rollback_needs_checkpoint(size_t n_tokens) const {
++        return ctx_tgt_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_FULL ||
++               (ctx_tgt_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_RS && n_tokens > llama_n_rs_seq(ctx_tgt));
++    }
++
+     void update_slots() {
+ #ifdef DEBUG_TIMINGS
+         static int64_t t_prev = 0;
+@@ -3048,9 +3054,7 @@ private:
+             }
+ 
+             if (!draft.empty()) {
+-                const bool use_ckpt_tgt =
+-                    ctx_tgt_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_FULL ||
+-                   (ctx_tgt_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_RS && draft.size() > llama_n_rs_seq(ctx_tgt));
++                const bool use_ckpt_tgt = target_rollback_needs_checkpoint(draft.size());
+ 
+                 const bool use_ckpt_dft =
+                    (ctx_dft_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_RS && draft.size() > llama_n_rs_seq(ctx_dft));
+@@ -3890,8 +3894,15 @@ private:
+ 
+             // verify and try to accept the draft
+             {
+-                // save the sampler sampler state in case we need to restore it
+-                common_sampler_ptr smpl_save(common_sampler_clone(slot.smpl.get()));
++                // Verification always commits at least one target token. Even a
++                // first-position rejection therefore rolls back at most n_draft.
++                static const bool force_copy = std::getenv("GAINZ_MTP_FORCE_SAMPLER_COPY") != nullptr;
++                common_sampler_ptr smpl_save;
++                if (force_copy || target_rollback_needs_checkpoint(n_draft)) {
++                    smpl_save.reset(common_sampler_clone(slot.smpl.get()));
++                }
++                SLT_DBG(slot, "verification sampler snapshot: %s (draft length %zu)\n",
++                        smpl_save ? "saved" : "skipped", n_draft);
+ 
+                 GGML_ASSERT(slot.spec_i_batch.size() == n_draft + 1);
+                 auto accepted = common_sampler_sample_and_accept_n(slot.smpl.get(), slot.ctx_tgt, slot.spec_i_batch, slot.spec_draft);
+@@ -3901,9 +3912,7 @@ private:
+ 
+                 const uint32_t n_rollback = slot.spec_draft.size() + 1 - accepted.size();
+ 
+-                const bool use_ckpt_tgt =
+-                    ctx_tgt_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_FULL ||
+-                    (ctx_tgt_seq_rm_type == COMMON_CONTEXT_SEQ_RM_TYPE_RS && n_rollback > llama_n_rs_seq(ctx_tgt));
++                const bool use_ckpt_tgt = target_rollback_needs_checkpoint(n_rollback);
+ 
+                 // check for partial draft acceptance
+                 if (n_rollback > 0) {
+@@ -3929,6 +3938,7 @@ private:
+                         slot.mem.seq_rm(slot.id, ckpt.pos_max + 1, -1);
+ 
+                         slot.prompt.tokens.keep_first(ckpt.n_tokens);
++                        GGML_ASSERT(smpl_save);
+                         slot.smpl = std::move(smpl_save);
+ 
+                         return;
