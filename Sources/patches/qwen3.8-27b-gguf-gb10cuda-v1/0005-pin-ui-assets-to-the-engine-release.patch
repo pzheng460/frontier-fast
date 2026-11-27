@@ -1,0 +1,23 @@
+diff --git a/tools/ui/CMakeLists.txt b/tools/ui/CMakeLists.txt
+index 208b46a..f658817 100644
+--- a/tools/ui/CMakeLists.txt
++++ b/tools/ui/CMakeLists.txt
+@@ -17,16 +17,14 @@ if(DEFINED LLAMA_WEBUI_HF_BUCKET)
+     message(DEPRECATION "LLAMA_WEBUI_HF_BUCKET is deprecated, use LLAMA_UI_HF_BUCKET instead")
+ endif()
+ 
+-# Resolve HF asset version: explicit env var > derived from build number > unset
++# This track builds b10237 even when a shallow checkout reports a different commit count.
+ if(DEFINED ENV{HF_WEBUI_VERSION})
+     set(HF_UI_VERSION "$ENV{HF_WEBUI_VERSION}")
+     message(DEPRECATION "HF_WEBUI_VERSION env var is deprecated, use HF_UI_VERSION instead")
+ elseif(DEFINED ENV{HF_UI_VERSION})
+     set(HF_UI_VERSION "$ENV{HF_UI_VERSION}")
+-elseif(DEFINED LLAMA_BUILD_NUMBER)
+-    set(HF_UI_VERSION "b${LLAMA_BUILD_NUMBER}")
+ else()
+-    set(HF_UI_VERSION "")
++    set(HF_UI_VERSION "b10237")
+ endif()
+ 
+ if(NOT "${HF_UI_VERSION}" STREQUAL "" AND NOT HF_UI_VERSION MATCHES "^[A-Za-z0-9._-]+$")
